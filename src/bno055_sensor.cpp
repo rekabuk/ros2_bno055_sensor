@@ -32,10 +32,12 @@ BNO055Sensor::BNO055Sensor(rclcpp::NodeOptions const & options)
   mag_publisher_ = this->create_publisher<sensor_msgs::msg::MagneticField>("mag", 10);
   temp_publisher_ = this->create_publisher<sensor_msgs::msg::Temperature>("temp", 10);
   diagnostics_publisher_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticStatus>("diagnostics", 10);
+  calibration_publisher_ = this->create_publisher<diagnostic_msgs::msg::DiagnosticStatus>("calibration", 10);
   data_timer_ = this->create_wall_timer(10ms, std::bind(&BNO055Sensor::publish_data, this));
   diagnostics_timer_ = this->create_wall_timer(1000ms, std::bind(&BNO055Sensor::publish_diagnostics, this));
+  calibration_timer_ = this->create_wall_timer(1000ms, std::bind(&BNO055Sensor::publish_calibration, this));
 
-  this->declare_parameter<std::string>("i2c_address", "/dev/i2c-3");
+  this->declare_parameter<std::string>("i2c_address", "/dev/i2c-1");
   this->declare_parameter<std::string>("device_address", "0x28");
   this->declare_parameter<std::string>("frame_id", "imu_link");
 
@@ -229,6 +231,67 @@ std::string BNO055Sensor::system_error_as_string(u8 system_error)
     case 9: retval = "Fusion algorithm configuration error"; break;
   }
   return retval;
+}
+
+void BNO055Sensor::publish_calibration()
+{
+  bno055_accel_offset_t accel_offset;
+  bno055_mag_offset_t   mag_offset;
+  bno055_gyro_offset_t  gyro_offset;
+
+  // Record comms status 
+  s32 comres = BNO055_SUCCESS;
+
+  // Diagnostic Message
+  auto diagnostic_msg = diagnostic_msgs::msg::DiagnosticStatus();
+  diagnostic_msg.name = "BNO055_Cal";
+
+
+  // get the xomms status 
+  //u8 system_status;
+
+  //comres += bno055_get_sys_stat_code( &system_status);
+
+  comres +=  bno055_read_accel_offset( &accel_offset);  // Accel  0x55 to 0x5A, 
+                                                        // Radius 0x67 to 0x68
+  comres +=  bno055_read_mag_offset( &mag_offset);      // Mag offset 0x5Bto 0x5F
+                                                        // Radius
+  comres +=  bno055_read_gyro_offset( &gyro_offset);    // Gyro 0x61 to 0x66
+
+
+  if (comres != 0)// || system_status == 1)
+  {
+    RCLCPP_FATAL(this->get_logger(), "Error reading BNO055 calibration data");
+    return;
+  }
+
+  diagnostic_msg.values.resize(11);
+  diagnostic_msg.values[0].key = "Accel_x";
+  diagnostic_msg.values[0].value = system_status_as_string(accel_offset.x);
+  diagnostic_msg.values[1].key = "Accel_y";
+  diagnostic_msg.values[1].value = system_status_as_string(accel_offset.y);
+  diagnostic_msg.values[2].key = "Accel_z";
+  diagnostic_msg.values[2].value = system_status_as_string(accel_offset.z);
+  diagnostic_msg.values[3].key = "Accel_r";
+  diagnostic_msg.values[3].value = system_status_as_string(accel_offset.z);
+  diagnostic_msg.values[4].key = "Mag_x";
+  diagnostic_msg.values[4].value = system_status_as_string(mag_offset.x);
+  diagnostic_msg.values[5].key = "Mag_y";
+  diagnostic_msg.values[5].value = system_status_as_string(mag_offset.y);
+  diagnostic_msg.values[6].key = "Mag_z";
+  diagnostic_msg.values[6].value = system_status_as_string(mag_offset.z);
+  diagnostic_msg.values[7].key = "Mag_r";
+  diagnostic_msg.values[7].value = system_status_as_string(mag_offset.r);
+  diagnostic_msg.values[8].key = "Gyro_x";
+  diagnostic_msg.values[8].value = system_status_as_string(gyro_offset.x);
+  diagnostic_msg.values[9].key = "Gyro_y";
+  diagnostic_msg.values[9].value = system_status_as_string(gyro_offset.y);
+  diagnostic_msg.values[10].key = "Gyro_z";
+  diagnostic_msg.values[10].value = system_status_as_string(gyro_offset.z);
+
+  diagnostics_publisher_->publish(diagnostic_msg);
+
+
 }
 
 void BNO055Sensor::publish_diagnostics()
